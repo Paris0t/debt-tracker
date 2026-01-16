@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debt Destroyer - Avalanche Tracker</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <script>tailwind.config={theme:{extend:{fontFamily:{mono:['JetBrains Mono','monospace'],display:['Space Grotesk','sans-serif']}}}}</script>
+    <style>body{font-family:'JetBrains Mono',monospace}.font-display{font-family:'Space Grotesk',sans-serif}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect}=React;
+
+// =================== UPDATE YOUR BALANCES HERE ===================
+const CARDS=[
+    {id:1,name:'Gemini',balance:3313,original:3313,apr:26,min:83,priority:1,color:'#FF6B35'},
+    {id:2,name:'Chase Prime',balance:4330,original:4330,apr:24,min:108,priority:2,color:'#4ECDC4'},
+    {id:3,name:'Capital One Savor',balance:2853,original:2853,apr:24,min:71,priority:3,color:'#FFE66D'},
+    {id:4,name:'BILT',balance:1278,original:1278,apr:24,min:32,priority:4,color:'#95E1D3'},
+    {id:5,name:'U.S. Bank',balance:1015,original:1015,apr:24,min:25,priority:5,color:'#DDA0DD'},
+    {id:6,name:'Fidelity',balance:2498,original:2498,apr:18.74,min:62,priority:6,color:'#98D8C8'},
+];
+const BUDGET=1100;
+// =================================================================
+
+const Icon=({d,size=16})=><svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d}/></svg>;
+
+function App(){
+    const[cards,setCards]=useState(()=>{try{return JSON.parse(localStorage.getItem('dc'))||CARDS}catch{return CARDS}});
+    const[payments,setPayments]=useState(()=>{try{return JSON.parse(localStorage.getItem('dp'))||[]}catch{return[]}});
+    const[budget,setBudget]=useState(()=>{try{return JSON.parse(localStorage.getItem('db'))||BUDGET}catch{return BUDGET}});
+    const[modal,setModal]=useState(false);
+    const[selCard,setSelCard]=useState(null);
+    const[amt,setAmt]=useState('');
+    const[expanded,setExpanded]=useState(null);
+
+    useEffect(()=>{try{localStorage.setItem('dc',JSON.stringify(cards))}catch{}},[cards]);
+    useEffect(()=>{try{localStorage.setItem('dp',JSON.stringify(payments))}catch{}},[payments]);
+    useEffect(()=>{try{localStorage.setItem('db',JSON.stringify(budget))}catch{}},[budget]);
+
+    const total=cards.reduce((s,c)=>s+c.balance,0);
+    const totalOrig=cards.reduce((s,c)=>s+c.original,0);
+    const paid=totalOrig-total;
+    const pct=totalOrig>0?((paid/totalOrig)*100).toFixed(1):0;
+    const mins=cards.filter(c=>c.balance>0).reduce((s,c)=>s+c.min,0);
+    const extra=budget-mins;
+
+    const calcMonths=()=>{
+        let t=cards.map(c=>({...c})).filter(c=>c.balance>0),m=0;
+        while(t.some(c=>c.balance>0)&&m<120){
+            m++;
+            let a=t.filter(c=>c.balance>0).sort((x,y)=>x.priority-y.priority);
+            if(!a.length)break;
+            let tm=a.reduce((s,c)=>s+Math.min(c.min,c.balance),0),ex=budget-tm;
+            a.forEach(c=>{c.balance*=(1+c.apr/100/12);c.balance-=Math.min(c.min,c.balance)});
+            let tg=a.find(c=>c.balance>0);
+            if(tg&&ex>0)tg.balance=Math.max(0,tg.balance-ex);
+        }
+        return m;
+    };
+
+    const months=calcMonths();
+    const payoffDate=new Date();payoffDate.setMonth(payoffDate.getMonth()+months);
+
+    const calcSaved=()=>{
+        let ai=0,t=cards.map(c=>({...c})).filter(c=>c.balance>0),m=0;
+        while(t.some(c=>c.balance>0)&&m<120){
+            m++;let a=t.filter(c=>c.balance>0).sort((x,y)=>x.priority-y.priority);
+            if(!a.length)break;
+            let tm=a.reduce((s,c)=>s+Math.min(c.min,c.balance),0),ex=budget-tm;
+            a.forEach(c=>{let i=c.balance*c.apr/100/12;ai+=i;c.balance+=i;c.balance-=Math.min(c.min,c.balance)});
+            let tg=a.find(c=>c.balance>0);if(tg&&ex>0)tg.balance=Math.max(0,tg.balance-ex);
+        }
+        let mi=0;t=cards.map(c=>({...c})).filter(c=>c.balance>0);m=0;
+        while(t.some(c=>c.balance>0)&&m<240){
+            m++;t.forEach(c=>{if(c.balance>0){let i=c.balance*c.apr/100/12;mi+=i;c.balance+=i;c.balance-=Math.min(c.min,c.balance)}});
+        }
+        return Math.max(0,mi-ai);
+    };
+    const saved=calcSaved();
+
+    const logPay=()=>{
+        if(!selCard||!amt)return;
+        const a=parseFloat(amt),c=cards.find(x=>x.id===selCard);
+        setPayments([{id:Date.now(),cardId:selCard,cardName:c.name,amount:a,date:new Date().toISOString()},...payments]);
+        setCards(cards.map(x=>x.id===selCard?{...x,balance:Math.max(0,x.balance-a)}:x));
+        setModal(false);setSelCard(null);setAmt('');
+    };
+
+    const delPay=(id)=>{
+        const p=payments.find(x=>x.id===id);if(!p)return;
+        setPayments(payments.filter(x=>x.id!==id));
+        setCards(cards.map(c=>c.id===p.cardId?{...c,balance:c.balance+p.amount}:c));
+    };
+
+    const exportCal=()=>{
+        let ev=[],d=new Date();
+        for(let i=0;i<=months;i++){
+            let dt=new Date(d.getFullYear(),d.getMonth()+i,1);
+            let ds=dt.toISOString().split('T')[0].replace(/-/g,'');
+            let tg=cards.filter(c=>c.balance>0).sort((a,b)=>a.priority-b.priority)[0];
+            ev.push(`BEGIN:VEVENT\nDTSTART:${ds}\nDTEND:${ds}\nSUMMARY:💳 Pay $${budget} - Target: ${tg?.name||'Done!'}\nEND:VEVENT`);
+        }
+        let ics=`BEGIN:VCALENDAR\nVERSION:2.0\n${ev.join('\n')}\nEND:VCALENDAR`;
+        let b=new Blob([ics],{type:'text/calendar'}),u=URL.createObjectURL(b),a=document.createElement('a');
+        a.href=u;a.download='debt-reminders.ics';a.click();URL.revokeObjectURL(u);
+    };
+
+    const reset=()=>{if(confirm('Reset all data?')){setCards(CARDS);setPayments([]);setBudget(BUDGET)}};
+
+    const active=cards.filter(c=>c.balance>0).sort((a,b)=>a.priority-b.priority);
+    const done=cards.filter(c=>c.balance===0);
+    const target=active[0];
+
+    return(
+        <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-gray-200 p-4">
+            <div className="max-w-5xl mx-auto">
+                <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
+                    <div>
+                        <h1 className="text-2xl md:text-3xl font-bold font-display bg-gradient-to-r from-orange-500 to-yellow-400 bg-clip-text text-transparent">DEBT DESTROYER</h1>
+                        <p className="text-xs text-gray-500">Avalanche Method Tracker</p>
+                    </div>
+                    <div className="flex gap-2">
+                        <button onClick={exportCal} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2 rounded-lg text-sm flex items-center gap-2">
+                            <Icon d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z" size={14}/>Calendar
+                        </button>
+                        <button onClick={reset} className="bg-slate-800/50 hover:bg-slate-700 border border-slate-700 text-gray-500 px-3 py-2 rounded-lg text-sm">Reset</button>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 shadow-lg shadow-orange-500/10">
+                        <div className="text-xs text-gray-400 mb-1">💰 REMAINING</div>
+                        <div className="text-xl md:text-2xl font-bold font-display text-orange-500">${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+                    </div>
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+                        <div className="text-xs text-gray-400 mb-1">📉 PAID OFF</div>
+                        <div className="text-xl md:text-2xl font-bold font-display text-teal-400">${paid.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+                    </div>
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+                        <div className="text-xs text-gray-400 mb-1">⏱️ MONTHS LEFT</div>
+                        <div className="text-xl md:text-2xl font-bold font-display text-yellow-400">{months}</div>
+                    </div>
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 shadow-lg shadow-teal-500/10">
+                        <div className="text-xs text-gray-400 mb-1">🏆 INTEREST SAVED</div>
+                        <div className="text-xl md:text-2xl font-bold font-display text-teal-400">${saved.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+                    </div>
+                </div>
+
+                <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 mb-6">
+                    <div className="flex justify-between text-sm mb-2"><span className="text-gray-400">Progress</span><span className="text-teal-400 font-semibold">{pct}%</span></div>
+                    <div className="h-3 bg-slate-700 rounded-full overflow-hidden">
+                        <div className="h-full bg-gradient-to-r from-teal-500 to-emerald-400 rounded-full transition-all duration-700" style={{width:`${pct}%`}}/>
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-500 mt-2">
+                        <span>Started: ${totalOrig.toLocaleString()}</span>
+                        <span>Free: {payoffDate.toLocaleDateString('en-US',{month:'short',year:'numeric'})}</span>
+                    </div>
+                </div>
+
+                <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 mb-6">
+                    <div className="flex flex-wrap justify-between items-center gap-4">
+                        <div>
+                            <div className="text-xs text-gray-400 uppercase mb-1">Monthly Budget</div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-gray-500">$</span>
+                                <input type="number" value={budget} onChange={e=>setBudget(Number(e.target.value))} className="w-28 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-orange-500"/>
+                            </div>
+                        </div>
+                        <div className="text-right">
+                            <div className="text-xs text-gray-500">Minimums: ${mins}</div>
+                            <div className="text-teal-400">Extra: <strong>${Math.max(0,extra)}</strong></div>
+                        </div>
+                    </div>
+                </div>
+
+                {target&&(
+                    <div className="bg-gradient-to-r from-orange-600 to-orange-500 rounded-xl p-5 mb-6 relative overflow-hidden shadow-lg shadow-orange-500/20">
+                        <div className="text-xs text-orange-200 mb-2">🎯 CURRENT TARGET</div>
+                        <div className="flex flex-wrap justify-between items-center gap-4">
+                            <div>
+                                <h2 className="text-xl font-bold font-display text-white">{target.name}</h2>
+                                <p className="text-orange-200 text-sm">{target.apr}% APR • Pay ${(target.min+extra).toFixed(0)}/mo</p>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-2xl md:text-3xl font-bold font-display text-white">${target.balance.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+                                <div className="text-xs text-orange-200">~{Math.ceil(target.balance/(target.min+extra))} months</div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                <div className="grid lg:grid-cols-2 gap-6">
+                    <div>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-semibold text-lg font-display">Attack Order</h3>
+                            <button onClick={()=>setModal(true)} className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 shadow-lg shadow-orange-500/20">
+                                + Log Payment
+                            </button>
+                        </div>
+                        {active.map((c,i)=>(
+                            <div key={c.id} onClick={()=>setExpanded(expanded===c.id?null:c.id)} className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 mb-3 cursor-pointer hover:border-slate-600 transition-all" style={{borderLeft:`4px solid ${c.color}`}}>
+                                <div className="flex justify-between items-center">
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${i===0?'bg-gradient-to-r from-orange-500 to-orange-600 text-white':'bg-slate-700 text-gray-400'}`}>{i+1}</div>
+                                        <div><div className="font-semibold">{c.name}</div><div className="text-xs text-gray-500">{c.apr}% APR</div></div>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <div className="text-right"><div className="font-bold font-display">${c.balance.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div className="text-xs text-gray-500">min ${c.min}</div></div>
+                                        <span className="text-gray-500">{expanded===c.id?'▲':'▼'}</span>
+                                    </div>
+                                </div>
+                                {expanded===c.id&&(
+                                    <div className="mt-4 pt-4 border-t border-slate-700">
+                                        <div className="h-2 bg-slate-700 rounded-full overflow-hidden mb-2">
+                                            <div className="h-full rounded-full" style={{width:`${(1-c.balance/c.original)*100}%`,background:c.color}}/>
+                                        </div>
+                                        <div className="flex justify-between text-xs text-gray-500">
+                                            <span>Original: ${c.original.toLocaleString()}</span>
+                                            <span>Paid: ${(c.original-c.balance).toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                        {done.length>0&&(
+                            <>
+                                <h4 className="text-sm text-gray-500 mt-6 mb-3">✅ Paid Off</h4>
+                                {done.map(c=>(
+                                    <div key={c.id} className="bg-slate-800/30 border border-slate-700 rounded-xl p-3 mb-2 opacity-60" style={{borderLeft:'4px solid #4ECDC4'}}>
+                                        <div className="flex justify-between items-center">
+                                            <span className="line-through">{c.name}</span>
+                                            <span className="text-teal-400 text-sm font-semibold">DONE</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </>
+                        )}
+                    </div>
+
+                    <div>
+                        <h3 className="font-semibold text-lg font-display mb-4">Payment History</h3>
+                        {payments.length===0?(
+                            <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-8 text-center text-gray-500">
+                                <p className="text-2xl mb-2">💵</p>
+                                <p>No payments logged yet</p>
+                                <p className="text-xs mt-1">Log your first payment!</p>
+                            </div>
+                        ):(
+                            <div className="max-h-96 overflow-y-auto space-y-2">
+                                {payments.map(p=>(
+                                    <div key={p.id} className="bg-slate-800/50 border border-slate-700 rounded-lg p-3 group">
+                                        <div className="flex justify-between items-center">
+                                            <div><div className="font-semibold">{p.cardName}</div><div className="text-xs text-gray-500">{new Date(p.date).toLocaleDateString()}</div></div>
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-teal-400 font-bold">-${p.amount.toLocaleString()}</span>
+                                                <button onClick={e=>{e.stopPropagation();delPay(p.id)}} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 p-1">✕</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {modal&&(
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                        <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-md shadow-2xl">
+                            <h3 className="text-xl font-bold font-display mb-5">Log Payment</h3>
+                            <div className="mb-4">
+                                <label className="text-xs text-gray-400 block mb-2">Card</label>
+                                <select value={selCard||''} onChange={e=>setSelCard(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-orange-500">
+                                    <option value="">Select card...</option>
+                                    {cards.filter(c=>c.balance>0).map(c=><option key={c.id} value={c.id}>{c.name} (${c.balance.toFixed(0)})</option>)}
+                                </select>
+                            </div>
+                            <div className="mb-6">
+                                <label className="text-xs text-gray-400 block mb-2">Amount</label>
+                                <input type="number" placeholder="0.00" value={amt} onChange={e=>setAmt(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-orange-500"/>
+                            </div>
+                            <div className="flex gap-3">
+                                <button onClick={()=>{setModal(false);setSelCard(null);setAmt('')}} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-semibold">Cancel</button>
+                                <button onClick={logPay} disabled={!selCard||!amt} className="flex-1 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 disabled:opacity-50 text-white py-3 rounded-lg font-semibold">Log</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                <div className="text-center text-xs text-gray-600 mt-10 pb-4">Data saved in browser • Export calendar for reminders</div>
+            </div>
+        </div>
+    );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
